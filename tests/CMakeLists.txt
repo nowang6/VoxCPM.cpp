@@ -7,7 +7,9 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/third_party/Catch2/CMakeLists.txt)
 else()
     FetchContent_Declare(
         Catch2
-        URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.5.0.tar.gz
+        GIT_REPOSITORY git@github.com:catchorg/Catch2.git
+        GIT_TAG v3.5.0
+        GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
 endif()

@@ -1,0 +1,14 @@
+[project]
+name = "voxcpm-cpp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gguf>=0.19.0",
+    "numpy>=2.5.2",
+    "safetensors>=0.8.0",
+    "torch>=2.13.0",
+    "transformers>=5.15.1",
+    "voxcpm>=2.0.3",
+]

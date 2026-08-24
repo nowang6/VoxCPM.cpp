@@ -66,7 +66,11 @@ if(EXISTS ${JSON_DIR}/CMakeLists.txt)
     add_subdirectory(${JSON_DIR} json)
 else()
     include(FetchContent)
-    FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+    FetchContent_Declare(json
+        GIT_REPOSITORY git@github.com:nlohmann/json.git
+        GIT_TAG v3.11.3
+        GIT_SHALLOW TRUE
+    )
     FetchContent_MakeAvailable(json)
 endif()
 
