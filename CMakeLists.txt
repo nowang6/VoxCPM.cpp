@@ -67,7 +67,7 @@ if(EXISTS ${JSON_DIR}/CMakeLists.txt)
 else()
     include(FetchContent)
     FetchContent_Declare(json
-        GIT_REPOSITORY git@github.com:nlohmann/json.git
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
         GIT_TAG v3.11.3
         GIT_SHALLOW TRUE
     )
