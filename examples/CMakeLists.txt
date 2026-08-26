@@ -3,6 +3,9 @@
 add_executable(voxcpm_tts voxcpm_tts.cpp)
 target_link_libraries(voxcpm_tts PRIVATE voxcpm)
 
+add_executable(voxcpm_perf voxcpm_perf.cpp)
+target_link_libraries(voxcpm_perf PRIVATE voxcpm)
+
 add_executable(voxcpm_quantize voxcpm_quantize.cpp)
 target_link_libraries(voxcpm_quantize PRIVATE voxcpm)
 

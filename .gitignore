@@ -40,3 +40,5 @@ models
 
 *.wav
 model_conversion_and_inference_zh.md
+
+*.gguf
