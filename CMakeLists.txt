@@ -57,6 +57,14 @@ set(GGML_DIR ${CMAKE_SOURCE_DIR}/third_party/ggml)
 set(GGML_VULKAN ${VOXCPM_VULKAN} CACHE BOOL "ggml: use Vulkan" FORCE)
 set(GGML_CUDA ${VOXCPM_CUDA} CACHE BOOL "ggml: use CUDA" FORCE)
 set(GGML_NATIVE ${VOXCPM_NATIVE} CACHE BOOL "ggml: optimize the build for the current system" FORCE)
+
+# Android：NDK 的 OpenMP 运行时是动态库 libomp.so，设备上不存在，运行时报
+# CANNOT LINK EXECUTABLE "libomp.so" not found。ggml 自带线程池，关闭不影响
+# 多线程性能。用户仍可显式 -DGGML_OPENMP=ON 覆盖。
+if(ANDROID AND NOT DEFINED GGML_OPENMP)
+    set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP")
+endif()
+
 add_subdirectory(${GGML_DIR} ggml)
 
 # nlohmann_json is a dependency of the core library (src/server_common.cpp),

@@ -23,6 +23,8 @@ struct Options {
     AudioVAEQuantizationMode audio_vae_mode = AudioVAEQuantizationMode::Mixed;
     int threads = 4;
     bool dry_run = false;
+    bool pure = false;
+    bool pure_keep_proj = false;
 };
 
 [[noreturn]] void fail(const std::string& message) {
@@ -33,15 +35,17 @@ void print_usage(const char* argv0) {
     std::cerr << "Usage:\n"
               << "  " << argv0
               << " --input MODEL.gguf --output MODEL-quant.gguf"
-              << " --type {Q2_K|Q3_K|Q4_K|Q5_K|Q8_0|F16|IQ2_XXS|IQ2_XS|IQ2_S|IQ3_XXS|IQ3_S|IQ1_S|IQ1_M|IQ4_NL|IQ4_XS}"
+              << " --type {Q2_K|Q3_K|Q4_0|Q4_K|Q5_K|Q8_0|F16|IQ2_XXS|IQ2_XS|IQ2_S|IQ3_XXS|IQ3_S|IQ1_S|IQ1_M|IQ4_NL|IQ4_XS}"
               << " [options]\n\n"
               << "Options:\n"
               << "  --input PATH\n"
               << "  --output PATH\n"
-              << "  --type {Q2_K|Q3_K|Q4_K|Q5_K|Q8_0|F16|IQ2_XXS|IQ2_XS|IQ2_S|IQ3_XXS|IQ3_S|IQ1_S|IQ1_M|IQ4_NL|IQ4_XS} (default: Q4_K)\n"
+              << "  --type {Q2_K|Q3_K|Q4_0|Q4_K|Q5_K|Q8_0|F16|IQ2_XXS|IQ2_XS|IQ2_S|IQ3_XXS|IQ3_S|IQ1_S|IQ1_M|IQ4_NL|IQ4_XS} (default: Q4_K)\n"
               << "  --audio-vae-mode {mixed|f16} (default: mixed)\n"
               << "  --imatrix PATH\n"
               << "  --threads INT (default: 4)\n"
+              << "  --pure (quantize every eligible weight to --type, no per-tensor upgrades)\n"
+              << "  --pure-keep-proj (--pure, but keep the Q8_0 projection/embedding group)\n"
               << "  --dry-run\n";
 }
 
@@ -70,6 +74,11 @@ bool parse_type(const std::string& raw, ggml_ftype* type, std::string* normalize
         return out;
     }();
 
+    if (upper == "Q4_0") {
+        *type = GGML_FTYPE_MOSTLY_Q4_0;
+        *normalized = "Q4_0";
+        return true;
+    }
     if (upper == "Q4_K" || upper == "Q4_K_M") {
         *type = GGML_FTYPE_MOSTLY_Q4_K;
         *normalized = "Q4_K";
@@ -165,7 +174,7 @@ Options parse_args(int argc, char** argv) {
             options.output_path = require_value("--output");
         } else if (arg == "--type") {
             if (!parse_type(require_value("--type"), &options.file_type, &options.file_type_label)) {
-                fail("--type must be one of: Q2_K, Q3_K, Q4_K, Q5_K, Q8_0, F16, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ1_S, IQ1_M, IQ4_NL, IQ4_XS");
+                fail("--type must be one of: Q2_K, Q3_K, Q4_0, Q4_K, Q5_K, Q8_0, F16, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ1_S, IQ1_M, IQ4_NL, IQ4_XS");
             }
         } else if (arg == "--audio-vae-mode") {
             if (!parse_audio_vae_mode(require_value("--audio-vae-mode"), &options.audio_vae_mode)) {
@@ -175,6 +184,11 @@ Options parse_args(int argc, char** argv) {
             options.imatrix_path = require_value("--imatrix");
         } else if (arg == "--threads") {
             options.threads = std::stoi(require_value("--threads"));
+        } else if (arg == "--pure") {
+            options.pure = true;
+        } else if (arg == "--pure-keep-proj") {
+            options.pure = true;
+            options.pure_keep_proj = true;
         } else if (arg == "--dry-run") {
             options.dry_run = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -254,6 +268,8 @@ int main(int argc, char** argv) {
         quantize_options.audio_vae_mode = options.audio_vae_mode;
         quantize_options.n_threads = options.threads;
         quantize_options.dry_run = options.dry_run;
+        quantize_options.pure = options.pure;
+        quantize_options.pure_keep_proj = options.pure_keep_proj;
 
         voxcpm::QuantizeStats stats;
         voxcpm::quantize_gguf(quantize_options, &stats);

@@ -88,6 +88,7 @@ ggml_type quantize_base_type(ggml_ftype type);
 bool is_supported_output_type(ggml_ftype type) {
     return type == GGML_FTYPE_MOSTLY_Q2_K ||
            type == GGML_FTYPE_MOSTLY_Q3_K ||
+           type == GGML_FTYPE_MOSTLY_Q4_0 ||
            type == GGML_FTYPE_MOSTLY_Q4_K ||
            type == GGML_FTYPE_MOSTLY_Q5_K ||
            type == GGML_FTYPE_MOSTLY_Q8_0 ||
@@ -338,6 +339,8 @@ ggml_type quantize_base_type(ggml_ftype file_type) {
             return GGML_TYPE_Q2_K;
         case GGML_FTYPE_MOSTLY_Q3_K:
             return GGML_TYPE_Q3_K;
+        case GGML_FTYPE_MOSTLY_Q4_0:
+            return GGML_TYPE_Q4_0;
         case GGML_FTYPE_MOSTLY_Q4_K:
             return GGML_TYPE_Q4_K;
         case GGML_FTYPE_MOSTLY_Q5_K:
@@ -370,6 +373,9 @@ ggml_type quantize_base_type(ggml_ftype file_type) {
 }
 
 ggml_type transformer_sensitive_override_type(ggml_ftype file_type) {
+    if (file_type == GGML_FTYPE_MOSTLY_Q4_0) {
+        return GGML_TYPE_Q5_0;
+    }
     if (file_type == GGML_FTYPE_MOSTLY_Q4_K ||
         file_type == GGML_FTYPE_MOSTLY_IQ4_NL ||
         file_type == GGML_FTYPE_MOSTLY_IQ4_XS) {
@@ -422,7 +428,12 @@ ggml_type choose_target_type(const ggml_tensor* tensor,
     const ggml_type base_type = quantize_base_type(file_type);
     VOXCPM_ASSERT(base_type != GGML_TYPE_COUNT);
 
-    if (file_type == GGML_FTYPE_MOSTLY_Q8_0 || file_type == GGML_FTYPE_MOSTLY_F16) {
+    // Pure mode skips every per-tensor precision bump so that the whole
+    // quantizable weight set lands on the base type, matching accelerators
+    // that only implement a single quantized format.
+    if ((options.pure && !options.pure_keep_proj) ||
+        file_type == GGML_FTYPE_MOSTLY_Q8_0 ||
+        file_type == GGML_FTYPE_MOSTLY_F16) {
         return base_type;
     }
 
@@ -444,7 +455,8 @@ ggml_type choose_target_type(const ggml_tensor* tensor,
     std::string stack_prefix;
     int block_index = -1;
     if (is_transformer_stack_name(name, &stack_prefix, &block_index)) {
-        const ggml_type sensitive_type = transformer_sensitive_override_type(file_type);
+        const ggml_type sensitive_type =
+            options.pure ? GGML_TYPE_COUNT : transformer_sensitive_override_type(file_type);
         if (sensitive_type != GGML_TYPE_COUNT && has_suffix(name, ".attn_v.weight")) {
             return sensitive_type;
         }

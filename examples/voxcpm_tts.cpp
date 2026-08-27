@@ -51,6 +51,10 @@ struct Options {
     bool retry_badcase = false;
     int retry_badcase_max_times = 3;
     float retry_badcase_ratio_threshold = 6.0f;
+    // Pin the CFM sampling noise so two runs are byte-comparable. Unset means
+    // seed from std::random_device, which is the historical behaviour.
+    unsigned int seed = 0;
+    bool has_seed = false;
 };
 
 struct WavData {
@@ -314,6 +318,7 @@ void print_usage(const char* argv0) {
               << "  --retry-badcase-ratio-threshold FLOAT (default: 6.0)\n"
               << "  --backend {cpu|cuda|vulkan|auto} (default: cpu)\n"
               << "  --threads INT (default: 4)\n"
+              << "  --seed UINT (default: random; pin it to make runs reproducible)\n"
               << "  --stream\n"
               << "  --stream-dir DIR\n"
               << "  --normalize\n"
@@ -355,6 +360,9 @@ Options parse_args(int argc, char** argv) {
             options.backend = parse_backend_type(require_value("--backend"));
         } else if (arg == "--threads") {
             options.threads = std::stoi(require_value("--threads"));
+        } else if (arg == "--seed") {
+            options.seed = static_cast<unsigned int>(std::stoul(require_value("--seed")));
+            options.has_seed = true;
         } else if (arg == "--stream") {
             options.stream = true;
         } else if (arg == "--stream-dir") {
@@ -1330,7 +1338,7 @@ int main(int argc, char** argv) {
                                          options.cfg_value);
             }
 
-            std::mt19937 rng(std::random_device{}());
+            std::mt19937 rng(options.has_seed ? options.seed : std::random_device{}());
             std::vector<float> generated_steps;
             generated_steps.reserve(static_cast<size_t>(max_len) * patch_size * feat_dim);
             std::vector<float> noise;

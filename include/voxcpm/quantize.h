@@ -21,6 +21,12 @@ struct QuantizeOptions {
     AudioVAEQuantizationMode audio_vae_mode = AudioVAEQuantizationMode::Mixed;
     int n_threads = 4;
     bool dry_run = false;
+    // Quantize every eligible weight to file_type's base type, skipping the
+    // per-tensor precision bumps (Q8_0 projections, sensitive-layer upgrades).
+    bool pure = false;
+    // With `pure`, still keep the Q8_0 projection/embedding group. Isolates how
+    // much of the damage comes from those few scale-critical tensors.
+    bool pure_keep_proj = false;
 };
 
 struct QuantizeStats {

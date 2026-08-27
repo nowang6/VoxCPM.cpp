@@ -1,16 +1,11 @@
 # VoxCPM.cpp
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-
 基于 [ggml](third_party/ggml) 的 VoxCPM 语音合成（TTS）**纯 C++ 推理引擎**。无 Python、无 PyTorch，编译即得可独立分发的命令行工具与 HTTP 服务，支持 x86 / ARM Linux / **安卓原生** / CUDA / Vulkan。
-
-- 模型下载（GGUF）：https://huggingface.co/bluryar/VoxCPM-GGUF
-- VoxCPM 官方仓库：https://github.com/OpenBMB/VoxCPM
 
 ## 特性
 
 - **零依赖推理**：ggml 单栈实现 LocEnc / BaseLM / ResidualLM / FSQ / LocDiT / AudioVAE 全流水线
-- **多后端**：CPU（含 NEON/dotprod/i8mm 向量化）、CUDA、Vulkan
+- **多后端**：CPU（含 NEON/dotprod/i8mm 向量化）、Vulkan
 - **安卓原生运行**：交叉编译产出 bionic 二进制，adb root shell 直接执行，不需要 Termux / proot
 - **OpenAI 兼容服务**：`/v1/audio/speech`、音色注册管理，支持 wav/mp3/opus/flac/pcm 与 SSE 流式
 - **量化工具链**：`voxcpm_quantize`、`voxcpm_imatrix`（重要性矩阵校准）
@@ -19,27 +14,23 @@
 ## 快速开始
 
 ```bash
-# 1. 获取代码与模型
-git clone <本仓库> && cd VoxCPM.cpp
-# 从 HuggingFace 下载 GGUF 模型到 models/ 目录
-
-# 2. 编译（x86_64 Linux / macOS）
+# 1. 编译（x86_64 Linux / macOS）
 cmake -B build
 cmake --build build -j
 
-# 3. 合成语音（带参考音色克隆）
+# 2. 合成语音（带参考音色克隆）
 ./build/examples/voxcpm_tts \
-  --model-path ./models/voxcpm-0.5b-q4_k.gguf \
+  --model-path ./models/voxcpm-0.5b-q4_0.gguf \
   --prompt-audio ./examples/tai_yi_xian_ren.wav \
   --prompt-text "对，这就是我，万人敬仰的太乙真人。" \
   --text "大家好，这是一段本地合成的语音。" \
   --output ./out.wav \
-  --threads 8
+  --threads 3
 
-# 4. 不带参考音色（默认音色）
+# 3. 不带参考音色（默认音色）
 ./build/examples/voxcpm_tts \
-  --model-path ./models/voxcpm-0.5b-q4_k.gguf \
-  --text "你好，世界。" --output hello.wav --threads 8
+  --model-path ./models/voxcpm-0.5b-q4_0.gguf \
+  --text "你好，世界。" --output hello.wav --threads 3
 ```
 
 依赖：CMake ≥ 3.14、C++17 编译器。`nlohmann/json` 在 `third_party/json` 缺失时由
@@ -49,7 +40,28 @@ FetchContent 自动拉取；离线环境可手动放置：
 git clone --depth 1 -b v3.11.3 https://github.com/nlohmann/json third_party/json
 ```
 
-## 性能调优（重要）
+## 模型量化
+
+从 HuggingFace 的 PyTorch 原始权重（VoxCPM-0.5B）到量化 GGUF 共两步，转换依赖只需装一次：
+
+```bash
+# 0. 准备转换环境（仅步骤 1 需要，推理本身零 Python 依赖）
+uv venv .venv --python 3.12
+source .venv/bin/activate
+uv pip install -e .
+
+# 1. PyTorch → F16 GGUF（中间产物，约 2.8 GB）
+python scripts/convert_voxcpm_to_gguf.py /path/to/VoxCPM-0.5B \
+    --output models/voxcpm-0.5b-f16.gguf
+
+# 2. F16 → Q8_0 量化（最终产物约 476 MB，压缩约 5.9 倍）
+./build/examples/voxcpm_quantize \
+    --input models/voxcpm-0.5b-f16.gguf \
+    --output models/voxcpm-0.5b-q8_0.gguf \
+    --type Q8_0 --threads 8
+```
+
+## 性能调优
 
 ### big.LITTLE SoC 上线程数 ≠ 核心数
 
@@ -65,6 +77,27 @@ Snapdragon 8 Gen 2（1×X3 + 4×A715/A710 + 3×A510）同一句话的实测：
 
 结论：8 Gen 2 用 `--threads 5`；8 Gen 3（1+5+2 结构）试 `--threads 6`。
 
+Snapdragon 6 Gen 4（4×A520 @1.8 GHz + 3×A720 @2.2 GHz + 1×A720 @2.3 GHz，Android 16）
+的 `voxcpm_perf` matmul 基准（A[4096,4096] Q4_K × B[4096,4] F32）则更为极端——悬崖就在
+快核（A720，核 4–7）的规模上：
+
+| 线程数 | 耗时 | 带宽 | 吞吐 |
+|-------|------|------|------|
+| 1 | 3.32 ms | 2.87 GB/s | 40.48 GFLOPS |
+| 2 | 1.96 ms | 4.86 GB/s | 68.64 GFLOPS |
+| **3（占满中核簇）** | **1.47 ms** | **6.47 GB/s** | **91.40 GFLOPS** |
+| 4 | 20.81 ms | 0.46 GB/s | 6.45 GFLOPS |
+| 5 | 31.85 ms | 0.30 GB/s | 4.21 GFLOPS |
+| 6 | 20.40 ms | 0.47 GB/s | 6.58 GFLOPS |
+| 7 | 20.15 ms | 0.47 GB/s | 6.66 GFLOPS |
+| 8（全核） | 7.53 ms | 1.26 GB/s | 17.81 GFLOPS |
+
+threads=4 起吞吐塌缩一个数量级：该机亲和性 8/8、cpuset 未受限，塌缩纯粹来自大小核调度——
+不绑核时调度器不会把 4 个线程都留在 A720 上，只要有一个工作线程落到 A520（或跨簇迁移），
+每个同步点都被最慢线程拖住；threads=8 全核也只恢复到最优值的 1/5。结论：6 Gen 4 用
+`--threads 3`（恰好占满 2.2 GHz A720 中核簇，比单跑 2.3 GHz 大核快 2.3 倍）；换机型先跑
+`voxcpm_perf` 实测，可用 `--matmul-only --pin 4,5,6,7` 验证绑核后的真实快核吞吐。
+
 ### 性能诊断工具 `voxcpm_perf`
 
 ```bash
@@ -75,15 +108,6 @@ Snapdragon 8 Gen 2（1×X3 + 4×A715/A710 + 3×A510）同一句话的实测：
 
 工具输出 Q4_K 权重 × F32 激活的 matmul 吞吐（GB/s、GFLOPS）——这是 decode 阶段的核心瓶颈，
 可用于快速对比不同线程数 / 绑核策略下的内核吞吐。
-
-### Android 上的 cpuset 陷阱
-
-adb shell 启动的进程常被 Android 归入 background cpuset，**只能用小核**，性能损失 3~5 倍。
-`voxcpm_perf` 的系统诊断会直接显示"可用亲和性 (3/8)"之类的警告。root 修复方法：
-
-```bash
-echo $$ > /dev/cpuset/top-app/tasks    # 把当前 shell 移到大核组，再重新运行程序
-```
 
 ## 构建指南
 
@@ -114,14 +138,6 @@ grep -o -E 'asimddp|i8mm|bf16|fphp' /proc/cpuinfo | sort -u
 # 四项都有 → 可用；缺任一项会直接 SIGILL 崩溃，老旗舰（855/865）请降低架构串
 ```
 
-### CUDA
-
-```bash
-cmake -B build-cuda -DVOXCPM_CUDA=ON \
-  -DCMAKE_CUDA_ARCHITECTURES=89 \    # 30系=86，40系=89，按实际显卡填
-  -DVOXCPM_BUILD_BENCHMARK=OFF -DVOXCPM_BUILD_TESTS=OFF
-cmake --build build-cuda -j
-```
 
 ### Android 原生（交叉编译）
 
@@ -136,18 +152,30 @@ cmake --build build-cuda -j
 | clang < 16 解析不了新 libc++ 头的 namespace 属性语法 | 编译器必须 ≥ 16 |
 | NDK 无 libgcc | 用 `libclang_rt.builtins-aarch64-android.a` 顶替 |
 | CMake `SYSTEM_NAME=Android` 要求 standalone-gcc 布局 | 改设 `CMAKE_SYSTEM_NAME=Linux` + 交叉参数 |
+| 官方 toolchain 未指定 ABI 时默认 **armeabi-v7a（32 位）**：`ggml-cpu-impl.h` 的 32 位 fallback `vcvtnq_s32_f32` 与 clang 自带 `arm_neon.h` 重定义冲突，且 armv8.6 架构串对 32 位目标无效 | 显式 `-DANDROID_ABI=arm64-v8a`；改 ABI 必须删净 build 目录重配，旧缓存上追加无效 |
+| OpenMP 默认开启，`libggml-cpu.so` 依赖 `libomp.so`，设备上没有 → 运行时 `CANNOT LINK EXECUTABLE` | `-DGGML_OPENMP=OFF`（ggml 自带线程池，不影响多线程性能） |
 
 链接配方：`-nostdlib++` + NDK 的 `libc++_static.a` + `libc++abi.a` + `libunwind.a` 全静态。
 
 ```bash
+# NDK 指向本机安装路径（r25+ 均可）
+NDK=$HOME/android-ndk-r27d
+
 cmake -B build-android \
-  -DCMAKE_TOOLCHAIN_FILE=<aarch64-android 工具链文件> \
+  -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
   -DCMAKE_BUILD_TYPE=Release \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-28 \
   -DVOXCPM_NATIVE=OFF \
   -DGGML_CPU_ARM_ARCH="armv8.6-a+dotprod+i8mm+bf16+fp16" \
+  -DGGML_OPENMP=OFF \
   -DVOXCPM_BUILD_TESTS=OFF -DVOXCPM_BUILD_BENCHMARK=OFF
 cmake --build build-android -j
 ```
+
+`ANDROID_ABI=arm64-v8a` 必须显式指定（默认 32 位会构建失败，见上表）；架构串要求
+`/proc/cpuinfo` 同时具备 `asimddp/i8mm/bf16/fphp` 四项特性——Cortex-A720/A520（如
+Snapdragon 6 Gen 4、8 Gen 1 及更新旗舰）全系支持，老机型见"ARM64 Linux"一节的降级说明。
 
 ### 构建选项
 
@@ -240,18 +268,24 @@ voxcpm-android/
 
 ```bash
 adb push voxcpm-android /data/local/tmp/voxcpm-android
+adb push voxcpm-0.5b-q8_0.gguf /data/local/tmp/voxcpm-android/
 
-adb shell                          # 进入设备（root shell）
+adb shell
 cd /data/local/tmp/voxcpm-android
+export LD_LIBRARY_PATH=/data/local/tmp/voxcpm-android/lib
+
 chmod +x run.sh bin/*
-./run.sh "你好，这是原生安卓环境运行的语音合成。" out.wav
+
+./run.sh \
+  --model-path ./voxcpm-0.5b-q4_k.gguf \
+  --text "$(cat test.txt)" \
+  --output out4k.wav \
+  --threads 3
 
 # 取回音频（电脑端）
-adb pull /data/local/tmp/voxcpm-android/out.wav
+adb pull /data/local/tmp/voxcpm-android/out8.wav
 ```
 
-> 新设备先跑 `LD_LIBRARY_PATH=lib bin/voxcpm_perf` 检查亲和性，若被 cpuset 限制到小核，
-> 先执行上面的修复再测性能。
 
 ## 常见问题
 
